@@ -15,6 +15,9 @@ namespace finder_ui.Controllers
         {
             var viewModel = new LoginViewModel
             {
+                // This is the controller and action to where you are sent after login
+                // If no Controller or Action is found in session 
+                // You are sent to Services.MyServices
                 Controller = TempData["ReturnToController"]?.ToString() ?? "Service",
                 Action = TempData["ReturnToAction"]?.ToString() ?? "MyServices",
             };
@@ -26,23 +29,45 @@ namespace finder_ui.Controllers
         {
             string loginEmail;
             User user;
-            using (var client = new UserProfileServiceReference.UserProfileServiceClient())
+            using (var profileClient = new UserProfileServiceReference.UserProfileServiceClient())
             {
-                user = client.GetUserByUserNameOrEmail(vm.username);
-                loginEmail = user?.Email;
-            }
+                user = profileClient.GetUserByUserNameOrEmail(vm.username);
 
-            using (var client = new UserLoginServiceReference.LoginServiceClient())
-            {
-                if (!client.UserLogin(loginEmail, vm?.userPassword ?? ""))
+                // use user.Email for login, but...
+                // if for some reason there is no user stored in profileservice then
+                // No user is found (user==null). If so then use vm.username for login
+                loginEmail = user?.Email ?? vm.username;
+
+
+                using (var loginClient = new UserLoginServiceReference.LoginServiceClient())
                 {
-                    Session["AuthorizedAsUser"] = "false";
-                    Session["UserID"] = null;
-                    ModelState.AddModelError("", "inloggningen misslyckades.");
-                    return View(vm);
+                    if (!loginClient.UserLogin(loginEmail, vm.userPassword ?? ""))
+                    {
+                        Session["AuthorizedAsUser"] = "false";
+                        Session["UserID"] = null;
+                        ModelState.AddModelError("", "inloggningen misslyckades.");
+                        return View(vm);
+                    }
+
+
+                    // Login successful!
+                    // if user==null then there is no profile object present in UserProfileServiceReference
+                    // So we call UserProfileServiceReference.UpdateUser() to make one
+                    if (user == null)
+                    {
+                        var loginUser = loginClient.GetUserById(loginClient.GetUserId(loginEmail));
+                        user = new User
+                        {
+                            Id = loginUser.ID,
+                            Email = loginUser.Email,
+                            Username = loginUser.Username,
+                            Name = loginUser.Firstname,
+                            Surname = loginUser.Surname,
+                        };
+                        profileClient.UpdateUser(user);
+                    }
                 }
             }
-
             Session["AuthorizedAsUser"] = "true";
             Session["UserID"] = user.Id;
             return RedirectToAction(vm.Action, vm.Controller);
